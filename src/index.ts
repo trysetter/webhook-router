@@ -59,7 +59,18 @@ export default {
 				body: JSON.stringify(payload),
 			});
 
-			// Return the response from the webhook
+			// If the response was successful, return a simple OK response
+			if (response.ok) {
+				return new Response(
+					JSON.stringify({ success: true, message: "Webhook forwarded successfully" }),
+					{ 
+						status: 200,
+						headers: { 'Content-Type': 'application/json' }
+					}
+				);
+			}
+
+			// If not successful, return the original error response
 			return new Response(response.body, {
 				status: response.status,
 				headers: response.headers,
