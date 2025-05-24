@@ -23,6 +23,32 @@ interface WebhookPayload {
 	[key: string]: unknown; // Allow additional properties
 }
 
+// Secondary webhook endpoint
+const SECONDARY_WEBHOOK_URL = 'https://webhook.site/20ec8a66-3d2f-4459-b8eb-38a8ada380b2';
+
+// Error handler function
+const errorHandler = (error: unknown): Response => {
+	console.error('Error:', error);
+	return new Response('Bad request', { status: 400 });
+};
+
+// Function to forward to secondary webhook
+const forwardToSecondaryWebhook = async (payload: WebhookPayload): Promise<void> => {
+	try {
+		await fetch(SECONDARY_WEBHOOK_URL, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify(payload),
+		});
+		console.log('Secondary webhook forwarded successfully');
+	} catch (error) {
+		// Log the error but don't fail the primary request
+		console.error('Secondary webhook forwarding failed:', error);
+	}
+};
+
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		// Only allow POST requests
@@ -50,7 +76,7 @@ export default {
 				return new Response('Cannot forward webhook to itself', { status: 400 });
 			}
 
-			// Forward the request to the webhook URL
+			// Forward the request to the primary webhook URL
 			const response = await fetch(webhookUrl, {
 				method: 'POST',
 				headers: {
@@ -58,6 +84,10 @@ export default {
 				},
 				body: JSON.stringify(payload),
 			});
+
+			// Forward to secondary webhook in the background
+			// Use waitUntil to ensure it completes even after response is sent
+			ctx.waitUntil(forwardToSecondaryWebhook(payload));
 
 			// If the response was successful, return a simple OK response
 			if (response.ok) {
@@ -77,7 +107,7 @@ export default {
 			});
 
 		} catch (error) {
-			return new Response('Bad request', { status: 400 });
+			return errorHandler(error);
 		}
 	},
 } satisfies ExportedHandler<Env>;
