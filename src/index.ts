@@ -11,8 +11,11 @@
  * Learn more at https://developers.cloudflare.com/workers/
  */
 
+import { SlackService } from './services/slack.service';
+
 export interface Env {
 	// Add your environment variables here
+	SECRET_SLACK_API_KEY: string;
 }
 
 // Define the expected payload structure
@@ -26,6 +29,9 @@ interface WebhookPayload {
 // Secondary webhook endpoint
 const SECONDARY_WEBHOOK_URL = 'https://webhook.site/20ec8a66-3d2f-4459-b8eb-38a8ada380b2';
 
+// Slack configuration
+const SLACK_CHANNEL_ID = 'C088XCR01L3';
+
 // Error handler function
 const errorHandler = (error: unknown): Response => {
 	console.error('Error:', error);
@@ -35,17 +41,31 @@ const errorHandler = (error: unknown): Response => {
 // Function to forward to secondary webhook
 const forwardToSecondaryWebhook = async (payload: WebhookPayload): Promise<void> => {
 	try {
+		const bodyPayload = JSON.stringify(payload);
+		console.log('Secondary webhook payload:', bodyPayload);
+		
 		await fetch(SECONDARY_WEBHOOK_URL, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
 			},
-			body: JSON.stringify(payload),
+			body: bodyPayload,
 		});
 		console.log('Secondary webhook forwarded successfully');
 	} catch (error) {
 		// Log the error but don't fail the primary request
 		console.error('Secondary webhook forwarding failed:', error);
+	}
+};
+
+// Safe Slack notification wrapper - can never crash the main operations
+const safeSlackNotification = async (payload: WebhookPayload, env: Env): Promise<void> => {
+	try {
+		const slackService = new SlackService(env.SECRET_SLACK_API_KEY);
+		await slackService.sendWebhookNotification(payload, SLACK_CHANNEL_ID);
+	} catch (error) {
+		// Log the error but never let it bubble up
+		console.error('Slack notification failed (safely handled):', error);
 	}
 };
 
@@ -77,17 +97,23 @@ export default {
 			}
 
 			// Forward the request to the primary webhook URL
+			const bodyPayload = JSON.stringify(payload);
+			console.log('Primary webhook payload:', bodyPayload);
+			
 			const response = await fetch(webhookUrl, {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json',
 				},
-				body: JSON.stringify(payload),
+				body: bodyPayload,
 			});
 
 			// Forward to secondary webhook in the background
 			// Use waitUntil to ensure it completes even after response is sent
 			ctx.waitUntil(forwardToSecondaryWebhook(payload));
+
+			// Send Slack notification in the background
+			ctx.waitUntil(safeSlackNotification(payload, env));
 
 			// If the response was successful, return a simple OK response
 			if (response.ok) {
